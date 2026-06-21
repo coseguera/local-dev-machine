@@ -1,0 +1,30 @@
+# cloud-init network-config (NoCloud) — EXAMPLE / TEMPLATE
+#
+# Wi-Fi gives the Pi the WAN access the Copilot CLI needs. This file holds your
+# PSK in plaintext, so it is git-ignored: copy it to `network-config` (no
+# extension) on the boot partition and fill in your details. NEVER commit the
+# filled copy.
+#
+#   cp network-config.example network-config   # then edit network-config
+#
+# Alternatively, skip this file entirely and set Wi-Fi in Raspberry Pi Imager's
+# advanced options when flashing, or use Ethernet (no config needed).
+#
+# TIP: Wi-Fi should come up on the FIRST boot - `user-data` sets the Wi-Fi
+# regulatory country and clears the rfkill block early (init-local stage) before
+# NetworkManager starts. If you'd rather take zero chances on a given flash,
+# Ethernet is a guaranteed fallback (no country/rfkill involved); you can move to
+# Wi-Fi afterwards. The country in `user-data` (US) must match this file.
+
+version: 2
+ethernets:
+  eth0:
+    dhcp4: true
+    optional: true
+wifis:
+  wlan0:
+    dhcp4: true
+    optional: true
+    access-points:
+      "__WIFI_SSID__":
+        password: "__WIFI_PSK__"
