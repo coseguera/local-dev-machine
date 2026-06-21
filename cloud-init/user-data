@@ -1,0 +1,169 @@
+#cloud-config
+# Pocket Dev - reproducible first-boot provisioning for the local-console LazyVim
+# setup on a Raspberry Pi 4 / Pi 5 (Raspberry Pi OS Lite 64-bit, Bookworm+).
+#
+# Datasource: NoCloud. Copy this file (plus meta-data, and optionally
+# network-config) to the FAT32 boot partition (labeled "bootfs", mounted at
+# /boot/firmware on the Pi). cloud-init applies it on first boot - no control
+# machine, no SSH needed. See cloud-init/README.md.
+#
+# BEFORE FLASHING: replace __LOCALUSER_PASSWORD_HASH__ below (see README for the
+# `openssl passwd -6` one-liner). Wi-Fi (for Copilot CLI WAN) is configured
+# separately via network-config or Raspberry Pi Imager - never commit creds.
+
+hostname: pocketdev
+manage_etc_hosts: true
+
+package_update: true
+package_upgrade: true
+
+# Non-autologin user (login prompt asks for username + password on the console).
+users:
+  - name: localuser
+    groups: [adm, sudo, users, video, render, input, netdev, gpio, i2c, spi, audio, plugdev]
+    shell: /bin/bash
+    lock_passwd: false
+    # Generate with: openssl passwd -6  (see cloud-init/README.md)
+    passwd: "__LOCALUSER_PASSWORD_HASH__"
+    sudo: ALL=(ALL) NOPASSWD:ALL
+
+ssh_pwauth: true
+
+packages:
+  # Core dev toolchain (apt-provided; Neovim/lazygit/Node come from upstream below)
+  - git
+  - curl
+  - unzip
+  - build-essential
+  - pkg-config
+  - python3-venv
+  - python3-pip
+  - pipx
+  - git-delta
+  - ripgrep
+  - fd-find
+  - fzf
+  # No-DE local console: cage (single-app Wayland kiosk) + foot (truecolor terminal)
+  - cage
+  - foot
+  # fontconfig provides fc-cache/fc-list (absent on Lite) and lets foot resolve
+  # fonts by name; noto-color-emoji renders :checkhealth's OK/ERROR/WARN emoji markers.
+  - fontconfig
+  - fonts-noto-color-emoji
+  # mDNS so `ssh localuser@pocketdev.local` resolves (co-equal SSH front door, ADR-0001)
+  - avahi-daemon
+
+write_files:
+  # foot: JetBrainsMono Nerd Font + truecolor + Tokyo Night palette (matches LazyVim).
+  - path: /home/localuser/.config/foot/foot.ini
+    owner: localuser:localuser
+    permissions: '0644'
+    content: |
+      font=JetBrainsMono Nerd Font:size=12
+
+      [colors]
+      alpha=1.0
+      background=1a1b26
+      foreground=c0caf5
+      regular0=15161e
+      regular1=f7768e
+      regular2=9ece6a
+      regular3=e0af68
+      regular4=7aa2f7
+      regular5=bb9af7
+      regular6=7dcfff
+      regular7=a9b1d6
+      bright0=414868
+      bright1=f7768e
+      bright2=9ece6a
+      bright3=e0af68
+      bright4=7aa2f7
+      bright5=bb9af7
+      bright6=7dcfff
+      bright7=c0caf5
+
+  # On tty1 login (after username + password), launch the fullscreen console.
+  # Boots into a SHELL inside foot (not nvim directly) so quitting nvim returns to
+  # a prompt instead of a dead end. Only tty1; SSH and other VTs are unaffected.
+  - path: /etc/profile.d/10-pocketdev-console.sh
+    permissions: '0644'
+    content: |
+      # Pocket Dev local console: fullscreen cage+foot on the physical console only.
+      if [ "$(tty)" = "/dev/tty1" ] && [ -z "$WAYLAND_DISPLAY" ]; then
+        exec cage -s -- foot
+      fi
+
+runcmd:
+  # Telescope/LazyVim expect `fd`; Debian ships the binary as `fdfind`.
+  - ln -sf "$(command -v fdfind)" /usr/local/bin/fd 2>/dev/null || true
+
+  # GitHub CLI (gh) from GitHub's official APT repo (arm64).
+  - install -d -m 0755 /etc/apt/keyrings
+  - 'curl -fsSL https://cli.github.com/packages/githubcli-archive-keyring.gpg -o /etc/apt/keyrings/githubcli-archive-keyring.gpg'
+  - chmod go+r /etc/apt/keyrings/githubcli-archive-keyring.gpg
+  - 'echo "deb [arch=$(dpkg --print-architecture) signed-by=/etc/apt/keyrings/githubcli-archive-keyring.gpg] https://cli.github.com/packages stable main" > /etc/apt/sources.list.d/github-cli.list'
+  - apt-get -o DPkg::Lock::Timeout=600 update
+  - DEBIAN_FRONTEND=noninteractive apt-get -o DPkg::Lock::Timeout=600 install -y gh
+
+  # Latest stable Neovim (apt's is too old for LazyVim), arm64 tarball, system-wide.
+  # Guarded so a download hiccup never aborts first boot.
+  - |
+    bash -c 'set -e; cd /tmp; curl -fsSL -o nvim.tgz https://github.com/neovim/neovim/releases/latest/download/nvim-linux-arm64.tar.gz; rm -rf /opt/nvim-linux-arm64; tar -C /opt -xzf nvim.tgz; d=$(tar -tzf nvim.tgz | head -1 | cut -d/ -f1); ln -sf "/opt/$d/bin/nvim" /usr/local/bin/nvim; rm -f nvim.tgz' || true
+
+  # lazygit (not in Debian repos), arm64. Resolve the version via the release
+  # redirect (NOT the rate-limited api.github.com) and use the lowercase `linux`
+  # asset name - both were real bugs found on hardware.
+  - |
+    bash -c 'set -e; cd /tmp; LG=$(curl -fsSLI -o /dev/null -w "%{url_effective}" https://github.com/jesseduffield/lazygit/releases/latest | grep -oP "tag/v\K[^/]+"); curl -fsSL -o lazygit.tgz "https://github.com/jesseduffield/lazygit/releases/download/v${LG}/lazygit_${LG}_linux_arm64.tar.gz"; tar -xzf lazygit.tgz lazygit; install -m 0755 lazygit /usr/local/bin/lazygit; rm -f lazygit lazygit.tgz' || true
+
+  # Ensure localuser owns its home before the per-user installs below (cloud-init wrote
+  # some files as root). Also make sure ~/.bashrc exists so nvm's profile setup works.
+  - mkdir -p /home/localuser/.config
+  - chown -R localuser:localuser /home/localuser
+  - runuser -l localuser -c '[ -f ~/.bashrc ] || cp /etc/skel/.bashrc ~/.bashrc'
+
+  # Node via nvm (Copilot CLI needs Node >=22), installed for the localuser user (not root).
+  - runuser -l localuser -c 'curl -fsSL https://raw.githubusercontent.com/nvm-sh/nvm/v0.40.5/install.sh | bash'
+  - runuser -l localuser -c 'export NVM_DIR="$HOME/.nvm"; . "$NVM_DIR/nvm.sh"; nvm install 22; nvm alias default 22; npm install -g @github/copilot' || true
+
+  # JetBrainsMono Nerd Font for the localuser user (glyphs live Pi-side in console mode).
+  - runuser -l localuser -c 'mkdir -p ~/.local/share/fonts && curl -fsSL -o /tmp/jbmono.zip https://github.com/ryanoasis/nerd-fonts/releases/latest/download/JetBrainsMono.zip && unzip -o -q /tmp/jbmono.zip -d ~/.local/share/fonts/JetBrainsMonoNerd && fc-cache -f && rm -f /tmp/jbmono.zip' || true
+
+  # LazyVim: clone the starter, drop its git history (becomes the user's own config).
+  # MUST run after the home chown and after nvim is on PATH. Guarded so a network
+  # hiccup just defers LazyVim to first `nvim` launch.
+  - runuser -l localuser -c '[ -e ~/.config/nvim ] || (git clone --depth 1 https://github.com/LazyVim/starter ~/.config/nvim && rm -rf ~/.config/nvim/.git)' || true
+
+  # Enlarge LazyVim's <C-/> terminal (snacks.nvim) to a large centered float so the
+  # Copilot CLI run inside :terminal has room. Written AFTER the clone (so it doesn't
+  # pre-create ~/.config/nvim and skip it) and BEFORE the headless sync.
+  - |
+    runuser -l localuser -c 'mkdir -p ~/.config/nvim/lua/plugins && cat > ~/.config/nvim/lua/plugins/snacks.lua <<"LUA"
+    -- Make the snacks.nvim terminal (the LazyVim <C-/> toggle) a large centered float
+    -- instead of the default ~40% bottom split, so the Copilot CLI has more room.
+    return {
+      "folke/snacks.nvim",
+      opts = {
+        styles = {
+          terminal = {
+            position = "float",
+            width = 0.9,
+            height = 0.9,
+            border = "rounded",
+          },
+        },
+      },
+    }
+    LUA' || true
+
+  # Pre-install LazyVim plugins headlessly so first launch is fast.
+  - runuser -l localuser -c 'command -v nvim >/dev/null && nvim --headless "+Lazy! sync" +qa 2>/dev/null' || true
+
+  # Final ownership sweep (per-user installs above wrote to ~ as localuser already, but be safe).
+  - chown -R localuser:localuser /home/localuser
+
+final_message: |
+  Pocket Dev first-boot provisioning complete after $UPTIME seconds.
+  Log in on the monitor as 'localuser' to drop into the fullscreen cage+foot console,
+  then run `nvim` for LazyVim. One manual step remains: run `copilot` once and
+  complete the device-code login in a browser to authenticate the Copilot CLI.

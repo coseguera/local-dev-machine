@@ -1,0 +1,43 @@
+# --- Secrets & host-specific overlays (NEVER commit) ---
+# Mirrors the azure-dev-machine rule: network details and creds stay local.
+*.local
+*.local.*
+secrets/
+overlays/secret*
+overlays/*.local
+
+# Wi-Fi / WAN provider credentials (provider #2, iPad path)
+wpa_supplicant*.conf
+*.nmconnection
+wifi.env
+wifi.conf
+
+# Filled cloud-init Wi-Fi config (holds PSK in plaintext); keep only the example.
+cloud-init/network-config
+!cloud-init/network-config.example
+
+# SSH keys / generated identities
+id_*
+*.pem
+*.key
+known_hosts
+
+# Generic env / credential files
+.env
+*.env
+!*.example.env
+
+# --- Build / flashing artifacts ---
+*.img
+*.img.xz
+*.zip
+downloads/
+fonts-cache/
+*.ttf
+*.otf
+!**/fonts/*.example
+
+# --- Editor / OS noise ---
+.DS_Store
+*.swp
+*~
