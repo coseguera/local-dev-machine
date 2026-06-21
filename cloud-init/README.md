@@ -32,6 +32,13 @@ Everything from the hand runbook, in one shot:
   and a Tokyo Night `foot.ini` so the shell/TUI match LazyVim.
 - A `tty1` launcher (`/etc/profile.d/10-pocketdev-console.sh`) that drops you into
   the fullscreen console after login — quitting nvim returns you to a shell.
+- **US keyboard layout** and the **Wi-Fi regulatory country** set early (see the
+  Networking note below) so the radio isn't rfkill-blocked on first boot.
+- **Encrypted Copilot CLI token storage** via a headless **gnome-keyring** Secret
+  Service. The login keyring is unlocked by your console password (PAM), and the
+  tty1 launcher starts the `secrets` component on the per-user D-Bus bus, so the
+  CLI's keytar backend stores the token encrypted instead of warning
+  `system vault not available`. Verify with `secret-tool` (see Troubleshooting).
 
 ## Image a new SD card and apply this config
 
@@ -81,6 +88,16 @@ cp network-config.example network-config   # then edit network-config
 
 Fill in your SSID and PSK. This file is git-ignored (it holds your PSK).
 
+> **Wi-Fi country (important):** Raspberry Pi OS Bookworm keeps the Wi-Fi radio
+> rfkill-blocked until a regulatory country is set, so without it `wlan0` stays
+> DOWN and first boot has no internet. `user-data` sets this early (in `bootcmd`)
+> and it defaults to **`US`** - if you're elsewhere, change every `US` in
+> `user-data`'s `bootcmd` block to your ISO 3166-1 code (e.g. `GB`, `DE`, `MX`).
+>
+> **Most reliable first boot:** use **Ethernet** for the initial provisioning
+> boot - it needs no country and never hits the rfkill block, so cloud-init can
+> always reach the internet. Switch to Wi-Fi afterwards.
+
 ### Step 4 - Copy the cloud-init files onto the boot partition
 
 Copy `user-data`, `meta-data`, and (if you made one) `network-config` to the
@@ -129,10 +146,58 @@ copilot
 
 and complete the device-code flow in a browser. After that it's authenticated.
 
+The token is saved **encrypted** in the gnome-keyring login keyring, which is
+unlocked by your login password (via PAM) and exposed to the CLI's keytar backend
+by the tty1 launcher (it starts the `secrets` component on the per-user D-Bus bus).
+You should *not* see `system vault not available`. If you do, see Troubleshooting.
+
 ## Notes
 
 - `user-data` is intentionally **pure ASCII** and every network install is
   guarded (`|| true`) so a transient download failure never wedges first boot —
   the affected step simply retries on next `nvim`/login.
+- **Keyboard** defaults to **US** (`/etc/default/keyboard`). Change `XKBLAYOUT`
+  in `user-data` if you need another layout.
 - To re-run provisioning on an already-booted card, clean cloud-init state:
-  `sudo cloud-init clean --logs` then reboot (rarely needed).
+  `sudo cloud-init clean --logs` then reboot. This is also the fix if first boot
+  had no internet (e.g. Wi-Fi country issue): get online, then clean + reboot to
+  let cloud-init reinstall everything.
+
+## Troubleshooting
+
+- **`wlan0` DOWN / no internet, and the console didn't launch (you got a plain
+  shell).** These go together: no network -> cloud-init couldn't install
+  `cage`/`foot`/etc. -> the tty1 launcher falls through to a shell. Almost always
+  the **Wi-Fi country** (rfkill) issue. On the Pi:
+
+  ```sh
+  sudo raspi-config nonint do_wifi_country US   # your country code
+  sudo rfkill unblock wifi
+  sudo systemctl restart NetworkManager
+  ip -brief addr                                 # wlan0 should now be UP
+  # if it didn't auto-connect:
+  sudo nmcli device wifi connect "YOUR_SSID" password "YOUR_PASSWORD"
+  ```
+
+  Then finish the build: `sudo cloud-init clean --logs && sudo reboot`.
+- **Wrong keys (GB layout).** `sudo raspi-config nonint do_configure_keyboard us`
+  (persists in `/etc/default/keyboard`).
+- **Copilot CLI: `system vault not available` (or `copilot` hangs on first
+  `/login`).** The keyring isn't being unlocked at login. The usual cause is a
+  missing PAM module: on Debian, `pam_gnome_keyring.so` ships in the **separate
+  `libpam-gnome-keyring`** package (the `gnome-keyring` package is only the daemon),
+  so the PAM lines are silently ignored and the login keyring stays locked. A locked
+  collection makes `keytar` block on a non-existent unlock prompt -> the hang. Check
+  and repair on the Pi:
+
+  ```sh
+  ls /usr/lib/*/security/pam_gnome_keyring.so 2>/dev/null || echo MODULE MISSING
+  sudo apt install -y libpam-gnome-keyring libsecret-tools
+  grep -q pam_gnome_keyring /etc/pam.d/login || sudo bash -c \
+    'printf "\nauth     optional  pam_gnome_keyring.so\nsession  optional  pam_gnome_keyring.so auto_start\n" >> /etc/pam.d/login'
+  sudo reboot   # PAM only unlocks at login; reboot also clears stray keyring daemons
+  ```
+
+  After reboot, from the console: `secret-tool store --label=t pd probe` (type a
+  value) should succeed, and `copilot` -> `/login` should store the token encrypted
+  with no warning.

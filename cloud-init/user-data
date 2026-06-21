@@ -14,6 +14,21 @@
 hostname: pocketdev
 manage_etc_hosts: true
 
+# Raspberry Pi OS Bookworm soft-blocks (rfkill) the Wi-Fi radio until a Wi-Fi
+# regulatory country is set - otherwise wlan0 stays DOWN and first boot has no
+# internet, so every download below silently fails. bootcmd runs in the very
+# first (init-local) stage, BEFORE NetworkManager brings the network up, which is
+# the only hook early enough to unblock Wi-Fi for the first boot itself.
+# Order matters: set the regulatory country FIRST (the kernel keeps the radio
+# rfkill-blocked until cfg80211 has a regdomain), then unblock rfkill LAST so the
+# radio comes up already knowing a valid country.
+# Change US to your ISO 3166-1 country code (must match your network-config).
+bootcmd:
+  - sh -c 'mkdir -p /etc/NetworkManager/conf.d && printf "[device]\nwifi.scan-rand-mac-address=no\n\n[wifi]\nregulatory-domain=US\n" > /etc/NetworkManager/conf.d/10-wifi-regdomain.conf'
+  - sh -c 'command -v raspi-config >/dev/null 2>&1 && raspi-config nonint do_wifi_country US || true'
+  - sh -c 'command -v iw >/dev/null 2>&1 && iw reg set US || true'
+  - rfkill unblock wifi || true
+
 package_update: true
 package_upgrade: true
 
@@ -52,35 +67,39 @@ packages:
   - fonts-noto-color-emoji
   # mDNS so `ssh localuser@pocketdev.local` resolves (co-equal SSH front door, ADR-0001)
   - avahi-daemon
+  # Encrypted token storage for the Copilot CLI (keytar -> libsecret -> Secret Service):
+  #  - gnome-keyring  : headless Secret Service provider (org.freedesktop.secrets)
+  #  - libpam-gnome-keyring : the pam_gnome_keyring.so PAM module (SEPARATE package!
+  #                   gnome-keyring ships only the daemon) - without it the PAM lines
+  #                   are silently ignored and the login keyring is never unlocked
+  #  - libsecret-1-0  : runtime lib the CLI's bundled keytar.node dlopens
+  #  - dbus-user-session : socket-activated per-user D-Bus bus at $XDG_RUNTIME_DIR/bus,
+  #                        which keytar auto-discovers (no DBUS_SESSION_BUS_ADDRESS needed)
+  #  - libsecret-tools : `secret-tool` for verifying the vault (debug aid)
+  # The login keyring is unlocked with the console password via PAM (pam_gnome_keyring,
+  # see runcmd), and the tty1 launcher starts the 'secrets' component on the user bus.
+  # Without all of this the CLI warns "system vault not available" -> plaintext fallback.
+  - gnome-keyring
+  - libpam-gnome-keyring
+  - libsecret-1-0
+  - libsecret-tools
+  - dbus-user-session
 
 write_files:
-  # foot: JetBrainsMono Nerd Font + truecolor + Tokyo Night palette (matches LazyVim).
-  - path: /home/localuser/.config/foot/foot.ini
-    owner: localuser:localuser
+  # US keyboard layout for the text console (Raspberry Pi OS defaults to GB, which
+  # misplaces @ " # \ | etc.). Applied to the live console by `setupcon` in runcmd.
+  - path: /etc/default/keyboard
     permissions: '0644'
     content: |
-      font=JetBrainsMono Nerd Font:size=12
+      XKBMODEL="pc105"
+      XKBLAYOUT="us"
+      XKBVARIANT=""
+      XKBOPTIONS=""
+      BACKSPACE="guess"
 
-      [colors]
-      alpha=1.0
-      background=1a1b26
-      foreground=c0caf5
-      regular0=15161e
-      regular1=f7768e
-      regular2=9ece6a
-      regular3=e0af68
-      regular4=7aa2f7
-      regular5=bb9af7
-      regular6=7dcfff
-      regular7=a9b1d6
-      bright0=414868
-      bright1=f7768e
-      bright2=9ece6a
-      bright3=e0af68
-      bright4=7aa2f7
-      bright5=bb9af7
-      bright6=7dcfff
-      bright7=c0caf5
+  # foot config (Tokyo Night palette) is written per-user in runcmd, NOT here:
+  # write_files runs before the user exists, so an `owner: localuser` chown fails
+  # and the file is unreliable. See the runcmd "foot.ini" step below.
 
   # On tty1 login (after username + password), launch the fullscreen console.
   # Boots into a SHELL inside foot (not nvim directly) so quitting nvim returns to
@@ -89,11 +108,34 @@ write_files:
     permissions: '0644'
     content: |
       # Pocket Dev local console: fullscreen cage+foot on the physical console only.
+      # Force the US keyboard layout for the Wayland (cage/foot) session too.
       if [ "$(tty)" = "/dev/tty1" ] && [ -z "$WAYLAND_DISPLAY" ]; then
+        export XKB_DEFAULT_LAYOUT=us
+        # Bring up the Secret Service so the Copilot CLI stores its token encrypted
+        # (keytar -> libsecret -> org.freedesktop.secrets) instead of plaintext.
+        # PAM (pam_gnome_keyring) already unlocked the login keyring with the login
+        # password; here we just ensure a user D-Bus bus exists and that the running
+        # keyring daemon exposes the 'secrets' component (PAM auto_start only brings up
+        # pkcs11/ssh, and with no desktop nothing else D-Bus-activates secrets).
+        export XDG_RUNTIME_DIR="${XDG_RUNTIME_DIR:-/run/user/$(id -u)}"
+        if command -v gnome-keyring-daemon >/dev/null 2>&1; then
+          eval "$(gnome-keyring-daemon --start --components=secrets,pkcs11,ssh 2>/dev/null)"
+          export SSH_AUTH_SOCK
+        fi
         exec cage -s -- foot
       fi
 
 runcmd:
+  # Apply the US keyboard layout written above to the live text console.
+  - setupcon --force --save 2>/dev/null || true
+
+  # Auto-unlock the gnome-keyring login keyring with the console login password so
+  # the Copilot CLI can store its token encrypted (Secret Service) instead of
+  # plaintext. Idempotent: only append if not already present. Covers tty1 login
+  # and SSH logins.
+  - bash -c 'grep -q pam_gnome_keyring /etc/pam.d/login || printf "\nauth     optional  pam_gnome_keyring.so\nsession  optional  pam_gnome_keyring.so auto_start\n" >> /etc/pam.d/login'
+  - bash -c 'grep -q pam_gnome_keyring /etc/pam.d/sshd || printf "\nauth     optional  pam_gnome_keyring.so\nsession  optional  pam_gnome_keyring.so auto_start\n" >> /etc/pam.d/sshd'
+
   # Telescope/LazyVim expect `fd`; Debian ships the binary as `fdfind`.
   - ln -sf "$(command -v fdfind)" /usr/local/bin/fd 2>/dev/null || true
 
@@ -122,6 +164,34 @@ runcmd:
   - chown -R localuser:localuser /home/localuser
   - runuser -l localuser -c '[ -f ~/.bashrc ] || cp /etc/skel/.bashrc ~/.bashrc'
 
+  # foot.ini (Tokyo Night palette + Nerd Font), written as localuser so it lands in
+  # the real home with correct ownership (write_files runs before the user exists).
+  - |
+    runuser -l localuser -c 'mkdir -p ~/.config/foot && cat > ~/.config/foot/foot.ini <<"INI"
+    font=JetBrainsMono Nerd Font:size=12
+
+    [colors]
+    alpha=1.0
+    background=1a1b26
+    foreground=c0caf5
+    regular0=15161e
+    regular1=f7768e
+    regular2=9ece6a
+    regular3=e0af68
+    regular4=7aa2f7
+    regular5=bb9af7
+    regular6=7dcfff
+    regular7=a9b1d6
+    bright0=414868
+    bright1=f7768e
+    bright2=9ece6a
+    bright3=e0af68
+    bright4=7aa2f7
+    bright5=bb9af7
+    bright6=7dcfff
+    bright7=c0caf5
+    INI' || true
+
   # Node via nvm (Copilot CLI needs Node >=22), installed for the localuser user (not root).
   - runuser -l localuser -c 'curl -fsSL https://raw.githubusercontent.com/nvm-sh/nvm/v0.40.5/install.sh | bash'
   - runuser -l localuser -c 'export NVM_DIR="$HOME/.nvm"; . "$NVM_DIR/nvm.sh"; nvm install 22; nvm alias default 22; npm install -g @github/copilot' || true
@@ -130,15 +200,17 @@ runcmd:
   - runuser -l localuser -c 'mkdir -p ~/.local/share/fonts && curl -fsSL -o /tmp/jbmono.zip https://github.com/ryanoasis/nerd-fonts/releases/latest/download/JetBrainsMono.zip && unzip -o -q /tmp/jbmono.zip -d ~/.local/share/fonts/JetBrainsMonoNerd && fc-cache -f && rm -f /tmp/jbmono.zip' || true
 
   # LazyVim: clone the starter, drop its git history (becomes the user's own config).
-  # MUST run after the home chown and after nvim is on PATH. Guarded so a network
-  # hiccup just defers LazyVim to first `nvim` launch.
-  - runuser -l localuser -c '[ -e ~/.config/nvim ] || (git clone --depth 1 https://github.com/LazyVim/starter ~/.config/nvim && rm -rf ~/.config/nvim/.git)' || true
+  # MUST run after the home chown and after nvim is on PATH. Idempotent + re-run-safe:
+  # keyed on LazyVim's init.lua marker (NOT mere directory existence), and it clears
+  # any stray/partial ~/.config/nvim left by an earlier failed (e.g. offline) boot -
+  # otherwise the later snacks step's mkdir would create the dir and block re-cloning.
+  - runuser -l localuser -c 'test -f ~/.config/nvim/init.lua || { rm -rf ~/.config/nvim; git clone --depth 1 https://github.com/LazyVim/starter ~/.config/nvim && rm -rf ~/.config/nvim/.git; }' || true
 
   # Enlarge LazyVim's <C-/> terminal (snacks.nvim) to a large centered float so the
-  # Copilot CLI run inside :terminal has room. Written AFTER the clone (so it doesn't
-  # pre-create ~/.config/nvim and skip it) and BEFORE the headless sync.
+  # Copilot CLI run inside :terminal has room. Only written once LazyVim is actually
+  # present (init.lua), so a failed clone never leaves a half-config behind.
   - |
-    runuser -l localuser -c 'mkdir -p ~/.config/nvim/lua/plugins && cat > ~/.config/nvim/lua/plugins/snacks.lua <<"LUA"
+    runuser -l localuser -c 'test -f ~/.config/nvim/init.lua && mkdir -p ~/.config/nvim/lua/plugins && cat > ~/.config/nvim/lua/plugins/snacks.lua <<"LUA"
     -- Make the snacks.nvim terminal (the LazyVim <C-/> toggle) a large centered float
     -- instead of the default ~40% bottom split, so the Copilot CLI has more room.
     return {
@@ -156,8 +228,8 @@ runcmd:
     }
     LUA' || true
 
-  # Pre-install LazyVim plugins headlessly so first launch is fast.
-  - runuser -l localuser -c 'command -v nvim >/dev/null && nvim --headless "+Lazy! sync" +qa 2>/dev/null' || true
+  # Pre-install LazyVim plugins headlessly so first launch is fast (only if LazyVim cloned).
+  - runuser -l localuser -c 'test -f ~/.config/nvim/init.lua && nvim --headless "+Lazy! sync" +qa 2>/dev/null' || true
 
   # Final ownership sweep (per-user installs above wrote to ~ as localuser already, but be safe).
   - chown -R localuser:localuser /home/localuser
