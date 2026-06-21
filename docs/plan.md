@@ -5,6 +5,31 @@
 > imaged and tested but Copilot CLI was too sluggish interactively (see ADR-0002 and
 > §3a). Earlier Zero-2-W-specific reasoning is retained below as exploration history.
 
+## 0. Current status (updated 2026-06-21)
+
+**Milestone reached: the cloud-init local-console build is implemented and
+hardware-validated on a Pi 4.** A single NoCloud `cloud-init/user-data` reproduces the
+hand-built environment end-to-end; all of the following were confirmed working on real
+hardware after a clean reflash:
+
+- Wi-Fi up on **first boot** (early `bootcmd` sets the Wi-Fi country + clears rfkill).
+- Boots into the **cage + foot** no-DE console on `tty1` (US keyboard).
+- **LazyVim** (idempotent clone) with the **snacks `<C-/>` large-float** terminal.
+- **JetBrainsMono Nerd Font** glyphs + **Tokyo Night** `foot` theme.
+- **Copilot CLI** installed (nvm + Node 22); **encrypted token vault** works
+  (gnome-keyring Secret Service, unlocked via PAM — the fix was the separate
+  `libpam-gnome-keyring` package).
+- sudo requires the localuser password; repo reviewed safe to make public.
+
+Known rough edge (accepted, not fixed): logging in **before cloud-init finishes** yields a
+half-provisioned console (default font, no glyphs/theme) until you wait for
+`cloud-init status --wait` and restart the console.
+
+**Immediate next step: land this milestone — push branch `restructure-and-cloud-init`
+and open a PR.** After that, the next build targets are USB **gadget mode** (the other
+co-equal front door), **OSC52 clipboard**, and the **ephemeral/factory-reset + quickstart**
+docs. See the updated §7 checklist.
+
 ## 1. Problem statement & goals
 
 Keep the **host Mac pristine** (ideally 100% stock) and run all dev work on a **throwaway,
@@ -237,54 +262,49 @@ colors). No-DE options:
 > Mirrors the session task tracker so the breakdown travels with this file. Phase-2 items list
 > their blocking dependencies in parentheses. Order within a phase is roughly execution order.
 
+### Phase 0 — Land the validated milestone (DO NEXT)
+- [ ] **land-milestone** — Push branch `restructure-and-cloud-init` and open a PR for the
+      hardware-validated cloud-init local-console build (see §0). No further code changes
+      needed to land; follow-on work (gadget mode, clipboard, docs) comes after.
+
 ### Phase 1 — Feasibility (do these first; no hard inter-deps)
-- [ ] **feas-ram** — Benchmark Zero 2 W RAM headroom: real session (nvim + 1-2 LSPs + Copilot CLI)
-      on 512 MB; test zram/swap, minimal LSP set, trimmed treesitter. **Make/break — decide go vs fallback.**
+- [~] **feas-ram** — N/A: Zero 2 W rejected as primary host (ADR-0002); Pi 4/5 removes the
+      RAM constraint. Retained for history.
 - [ ] **feas-gadget** — Validate USB gadget networking: dwc2 + CDC-ECM up; host sees `usb0`; avahi
       mDNS resolves `user@pocketdev.local` over the cable.
 - [ ] **feas-internet** — Confirm host (Mac) Internet Sharing → `usb0` piggyback (Starbucks/hotspot)
       without the Pi joining venue Wi‑Fi; verify CDC-ECM vs RNDIS with sharing; Pi Wi‑Fi = fallback.
-- [ ] **feas-glyphs** — Confirm stock Terminal.app works (tofu icons ok); document optional
-      JetBrainsMono Nerd Font install as the enhancement.
-- [ ] **feas-localconsole** — *(co-equal with SSH — **validate FIRST**)* Verify a no-DE local console
-      renders Nerd Font glyphs + Tokyo Night truecolor on the Zero 2 W: try **kmscon** (preferred) and
-      **cage+foot**; confirm it coexists with SSH and its RAM cost is acceptable. Plain LazyVim works
-      offline; Copilot CLI needs Pi Wi‑Fi WAN (#2) when no Mac is attached.
+- [x] **feas-glyphs** — Pi-side: JetBrainsMono Nerd Font glyphs render in the cage+foot console
+      (validated). Mac-side optional-font doc belongs to the SSH path (not yet built).
+- [x] **feas-localconsole** — DONE on Pi 4: **cage+foot** renders Nerd Font glyphs + Tokyo Night
+      truecolor, coexists with SSH. (kmscon confirmed unavailable in Bookworm; cage+foot chosen.)
 - [ ] **feas-clipboard** — Test OSC52 yank→host clipboard over SSH (iTerm2/Terminal.app/Blink);
       wire snacks/nvim-osc52 if it works.
-- [ ] **feas-repro** — Pick provisioner/image strategy. **Recommendation: cloud-init (NoCloud) as
-      primary** — Pi OS Bookworm+ supports it, no control machine needed, reuse azure-dev-machine's
-      `cloud-init.yaml`; thin `rpi-imager` image-prep; Ansible optional later layer.
-- [ ] **feas-power** — Confirm host USB port powers Zero 2 W under load without throttling;
-      document powered-hub fallback.
-- [ ] **feas-fallback** — Document Pi 4/5 and minimal cloud VM fallbacks and their trigger conditions.
+- [x] **feas-repro** — DONE: cloud-init (NoCloud) chosen and implemented; reflash = factory reset.
+- [~] **feas-power** — N/A for Pi 4 host (Zero 2 W power concern moot).
+- [x] **feas-fallback** — DONE: Pi 4/5 + cloud-VM fallbacks documented (ADR-0002).
 
 ### Phase 2 — Build (after Phase 1 picks a host)
-- [ ] **build-skeleton** — Scaffold repo: README, `docs/decisions/` (ADR-0001 access, ADR-0002 host),
-      `.gitignore` for secret overlays. *(needs: feas-repro, feas-fallback)*
-- [ ] **build-image** — Base image: pick OS, enable SSH, hostname `pocketdev`, create user, avahi.
-      *(needs: build-skeleton)*
+- [x] **build-skeleton** — DONE: repo scaffolded (README, `docs/decisions/`, `.gitignore` for
+      secret overlays, `cloud-init/`).
+- [x] **build-image** — DONE via cloud-init: Pi OS arm64, SSH, hostname `pocketdev`, localuser,
+      avahi/mDNS.
 - [ ] **build-gadget** — USB gadget networking: dtoverlay=dwc2, CDC-ECM bring-up, `usb0` addressing,
       mDNS, host-side doc. *(needs: build-image, feas-gadget)*
-- [ ] **build-wifi** — Pluggable WAN behind a stable default-route+DNS contract, orthogonal to the
-      gadget/SSH layer. P1 default = host Internet Sharing; swap target = Pi Wi‑Fi (gitignored
-      overlay, also required for iPad); cellular optional later. *(needs: feas-internet)*
-- [ ] **build-toolchain** — Port toolchain from `cloud-init.yaml`: build-essential, gh,
-      ripgrep/fd/fzf, delta, lazygit, Neovim release, nvm + Node 22 + `@github/copilot`.
-      *(needs: build-image)*
-- [ ] **build-lazyvim** — LazyVim: clone starter, strip git, snacks large-float `<C-/>` override,
-      headless `:Lazy! sync`, + trimmed LSP/parser low-RAM profile for the Zero 2 W.
-      *(needs: build-toolchain, feas-ram)*
+- [~] **build-wifi** — Partial: Pi onboard Wi‑Fi (provider #2) validated on first boot. P1 default
+      (host Internet Sharing over `usb0`) still pending — needs gadget mode. *(needs: feas-internet)*
+- [x] **build-toolchain** — DONE: build-essential, gh, ripgrep/fd/fzf, delta, lazygit, Neovim
+      release, nvm + Node 22 + `@github/copilot` (all installed by user-data, validated).
+- [x] **build-lazyvim** — DONE: idempotent LazyVim clone, snacks large-float `<C-/>` override,
+      headless `:Lazy! sync` (validated). Low-RAM profile not needed on Pi 4.
 - [ ] **build-clipboard** — Wire OSC52 yank if feas-clipboard validated.
       *(needs: build-lazyvim, feas-clipboard)*
-- [ ] **build-ephemeral** — Make provisioner idempotent; document factory-reset = one command.
-      *(needs: build-toolchain)*
-- [ ] **build-docs** — Trimmed LazyVim guide, plug-in-and-go quickstart, ADRs. *(needs: build-lazyvim)*
-- [ ] **build-localconsole** — *(co-equal front door — **BUILD/TRY THIS FIRST**)* No-DE local console
-      for a monitor+keyboard: install **kmscon** (preferred; replace `getty` on a VT, TrueType Nerd
-      Font, truecolor) or **cage+foot** kiosk, install JetBrainsMono Nerd Font on the Pi, boot into
-      `nvim`. Coexists with SSH; needs Pi Wi‑Fi WAN (#2) for Copilot CLI when no Mac is attached.
-      Never pulls in a desktop. *(needs: build-lazyvim, build-wifi; gated by feas-localconsole)*
+- [~] **build-ephemeral** — Mostly done: provisioner is idempotent (LazyVim clone fixed), reflash =
+      factory reset. Still want a one-paragraph factory-reset doc. *(needs: build-toolchain)*
+- [~] **build-docs** — Partial: `docs/quickstart-local-console.md` + `cloud-init/README.md` exist;
+      want a trimmed LazyVim guide + plug-in-and-go quickstart. *(needs: build-lazyvim)*
+- [x] **build-localconsole** — DONE on Pi 4: cage+foot kiosk, Nerd Font, boots into LazyVim,
+      Tokyo Night, encrypted Copilot vault; coexists with SSH. *(was: build first — done)*
 - [ ] **build-ipad** — *(P2, may or may not happen)* Ensure design doesn't preclude an iPad host:
       iPad needs WAN provider #2 (Pi Wi‑Fi/cellular) since iPadOS can't share to a USB gadget.
       Client = Blink Shell (SSH+mosh, OSC52, Nerd Font) + HW keyboard; USB‑C CDC-ECM link, Lightning
