@@ -25,7 +25,7 @@ users:
     lock_passwd: false
     # Generate with: openssl passwd -6  (see cloud-init/README.md)
     passwd: "__LOCALUSER_PASSWORD_HASH__"
-    sudo: ALL=(ALL) NOPASSWD:ALL
+    sudo: ALL=(ALL) ALL
 
 ssh_pwauth: true
 

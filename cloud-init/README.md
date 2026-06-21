@@ -21,7 +21,8 @@ NoCloud datasource when it finds `user-data` on the FAT32 boot partition. See
 
 Everything from the hand runbook, in one shot:
 
-- A non-autologin user `localuser` (you log in with username + password on the console).
+- A non-autologin user `localuser` (you log in with username + password on the
+  console; `sudo` also prompts for that password - no passwordless sudo).
 - Toolchain: git, build-essential, ripgrep, fd, fzf, git-delta, gh, pipx, python3-venv.
 - **Neovim** (latest stable, arm64 tarball) + **LazyVim** starter (git history stripped).
 - **lazygit** (arm64, via the release-redirect version trick — the api.github.com
