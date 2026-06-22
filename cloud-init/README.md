@@ -39,6 +39,10 @@ Everything from the hand runbook, in one shot:
   tty1 launcher starts the `secrets` component on the per-user D-Bus bus, so the
   CLI's keytar backend stores the token encrypted instead of warning
   `system vault not available`. Verify with `secret-tool` (see Troubleshooting).
+- **USB gadget mode** (CDC-ECM Ethernet over the Pi 4 **USB-C** port) so you can
+  `ssh localuser@pocketdev.local` over a single cable - no monitor, no Wi-Fi setup.
+  Activates after the first reboot. See [`docs/usb-gadget.md`](../docs/usb-gadget.md)
+  for the macOS host side (incl. Internet Sharing for Copilot CLI WAN).
 
 ## Image a new SD card and apply this config
 
@@ -201,3 +205,19 @@ You should *not* see `system vault not available`. If you do, see Troubleshootin
   After reboot, from the console: `secret-tool store --label=t pd probe` (type a
   value) should succeed, and `copilot` -> `/login` should store the token encrypted
   with no warning.
+- **USB gadget: host sees no `usb0` / `ssh pocketdev.local` fails.** Gadget mode
+  only activates after the **first reboot** (the firmware reads `config.txt`/
+  `cmdline.txt` at boot). Confirm and repair on the Pi:
+
+  ```sh
+  ls /sys/class/udc                 # must be non-empty (e.g. fe980000.usb)
+  grep dwc2 /boot/firmware/config.txt /boot/firmware/cmdline.txt
+  sudo systemctl status pocketdev-usb-gadget.service
+  ip -brief addr show usb0          # interface should exist
+  ```
+
+  If `/sys/class/udc` is empty, the `dtoverlay=dwc2,dr_mode=peripheral` (config.txt)
+  + `modules-load=dwc2` (cmdline.txt) edits didn't apply - re-check both files and
+  reboot. Also use a **data** USB-C cable (not charge-only), and on macOS enable
+  **Internet Sharing** to the RNDIS/`pocketdev` device for Copilot CLI WAN. Full
+  host-side walkthrough: [`docs/usb-gadget.md`](../docs/usb-gadget.md).

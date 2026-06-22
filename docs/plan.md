@@ -25,10 +25,11 @@ Known rough edge (accepted, not fixed): logging in **before cloud-init finishes*
 half-provisioned console (default font, no glyphs/theme) until you wait for
 `cloud-init status --wait` and restart the console.
 
-**Immediate next step: land this milestone — push branch `restructure-and-cloud-init`
-and open a PR.** After that, the next build targets are USB **gadget mode** (the other
-co-equal front door), **OSC52 clipboard**, and the **ephemeral/factory-reset + quickstart**
-docs. See the updated §7 checklist.
+**Milestone landed** (PR #1, merged). **USB gadget mode is now implemented** in
+cloud-init (CDC-ECM over USB-C, `docs/usb-gadget.md`) on branch `usb-gadget-mode` —
+pending hardware validation (`feas-gadget`/`feas-internet`). Remaining build targets:
+**OSC52 clipboard** and the **ephemeral/factory-reset + quickstart** docs. See the
+updated §7 checklist.
 
 ## 1. Problem statement & goals
 
@@ -289,8 +290,11 @@ colors). No-DE options:
       secret overlays, `cloud-init/`).
 - [x] **build-image** — DONE via cloud-init: Pi OS arm64, SSH, hostname `pocketdev`, localuser,
       avahi/mDNS.
-- [ ] **build-gadget** — USB gadget networking: dtoverlay=dwc2, CDC-ECM bring-up, `usb0` addressing,
-      mDNS, host-side doc. *(needs: build-image, feas-gadget)*
+- [x] **build-gadget** — DONE (cloud-init, awaiting HW validation): `config.txt`
+      `dtoverlay=dwc2,dr_mode=peripheral` + `cmdline.txt` `modules-load=dwc2`, a
+      libcomposite **CDC-ECM** bring-up script + `pocketdev-usb-gadget.service`, and a
+      DHCP-client `usb0` NetworkManager connection. Host-side doc: `docs/usb-gadget.md`.
+      Activates after the first reboot. *(needs: build-image, feas-gadget)*
 - [~] **build-wifi** — Partial: Pi onboard Wi‑Fi (provider #2) validated on first boot. P1 default
       (host Internet Sharing over `usb0`) still pending — needs gadget mode. *(needs: feas-internet)*
 - [x] **build-toolchain** — DONE: build-essential, gh, ripgrep/fd/fzf, delta, lazygit, Neovim
