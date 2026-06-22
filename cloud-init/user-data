@@ -220,9 +220,29 @@ write_files:
       method=link-local
       may-fail=true
 
+  # Force NetworkManager to MANAGE usb0. The CDC-ECM gadget netdev is created late (by
+  # pocketdev-usb-gadget.service via configfs, after NM's initial device scan) and NM
+  # otherwise leaves it `unmanaged` -> the interface stays admin-DOWN, never gets a
+  # carrier, and never DHCPs, so the cable looks dead even though the gadget is bound.
+  # This device drop-in makes NM adopt + bring up usb0 whenever it appears, so the
+  # usb0.nmconnection above can activate (DHCP from the Mac, IPv6 link-local fallback).
+  - path: /etc/NetworkManager/conf.d/20-usb0-managed.conf
+    permissions: '0644'
+    content: |
+      [device-usb0]
+      match-device=interface-name:usb0
+      managed=1
+
 runcmd:
   # Apply the US keyboard layout written above to the live text console.
   - setupcon --force --save 2>/dev/null || true
+
+  # Enable the SSH server. Raspberry Pi OS Lite ships sshd DISABLED by default (it is
+  # normally turned on by the Imager toggle or a `ssh` file on the boot partition);
+  # ssh_pwauth above only configures password auth, it does not enable the service.
+  # The USB-gadget + Wi-Fi SSH front door (ADR-0001) is dead without this -> clients
+  # get "Connection refused". --now also starts it this boot (no reboot needed for SSH).
+  - systemctl enable --now ssh 2>/dev/null || true
 
   # Auto-unlock the gnome-keyring login keyring with the console login password so
   # the Copilot CLI can store its token encrypted (Secret Service) instead of

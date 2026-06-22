@@ -96,6 +96,7 @@ power vs. data micro-USB ports) but was rejected as too slow for interactive Cop
 
 | Symptom | Check / fix |
 |---|---|
+| `ssh` says **Connection refused** | sshd must be running: on the Pi `sudo systemctl enable --now ssh`. (cloud-init now enables it automatically; older images flashed without the Imager "Enable SSH" toggle were affected.) |
 | Host sees no new interface | Use a **data** USB-C cable (not charge-only). On the Pi: `ls /sys/class/udc` must be non-empty; if empty, the `config.txt`/`cmdline.txt` edits didn't apply — re-check and reboot. |
 | `usb0` missing on the Pi | `systemctl status pocketdev-usb-gadget.service`; `journalctl -u pocketdev-usb-gadget`. Re-run `sudo /usr/local/sbin/pocketdev-usb-gadget`. |
 | `ssh pocketdev.local` won't resolve | `avahi-daemon` running? Try `ssh localuser@pocketdev.local%<host-iface>`, or read the Pi's `usb0` address from `ip -brief addr` over the console. |
