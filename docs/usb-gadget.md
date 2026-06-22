@@ -26,6 +26,39 @@ reboot** (the firmware reads `config.txt`/`cmdline.txt` only at boot):
 
 > Only the USB-C port does gadget mode; the USB-A ports are host-only.
 
+## macOS host: one-time client setup (fonts & keys)
+
+LazyVim's icons and the Tokyo Night theme render in the **client terminal**, not on the
+Pi, so over SSH they depend on the **Mac's** font — not the font baked into the Pi's
+console. Set this up once to get glyphs (and a working terminal toggle) in Terminal.app:
+
+1. **Install the matching Nerd Font** (the Pi uses JetBrainsMono Nerd Font):
+
+   ```sh
+   brew install --cask font-jetbrains-mono-nerd-font
+   ```
+
+   (The old `homebrew/cask-fonts` tap was merged into `homebrew/cask`; no `brew tap`
+   needed.)
+
+2. **Point Terminal.app at it:** Terminal -> Settings (Cmd+,) -> Profiles -> your profile
+   -> **Text** -> Font **Change...** -> pick **JetBrainsMono Nerd Font** (or
+   **JetBrainsMono Nerd Font Mono** for tighter spacing). New windows pick it up
+   immediately.
+
+3. **Verify glyphs** over SSH on the Pi:
+
+   ```sh
+   printf '\ue0b0 \uf07c \ue702 \uf09b \uf015 \uf0e7\n'
+   ```
+
+   You should see a powerline arrow, folder, branch, GitHub mark, house, and lightning -
+   not boxes or `?`.
+
+4. **Terminal toggle:** Terminal.app cannot send `Ctrl+/`, so use the terminal-agnostic
+   fallback inside `nvim` - **`Ctrl+t`** (toggles open/close) or **`<Space>tt`**. (Other
+   terminals like iTerm2/Ghostty can instead remap `Ctrl+/` to send `\037`.)
+
 ## macOS host: just SSH (no internet sharing)
 
 1. Connect the Mac to the Pi's **USB-C** port with a data-capable cable.
