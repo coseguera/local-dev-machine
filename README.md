@@ -26,8 +26,14 @@ Design/feasibility stage. The full design and phased build plan live in
 
 ## Start here
 
+- **Plug-in-and-go quickstart (both front doors):**
+  [`docs/quickstart.md`](docs/quickstart.md)
 - **Image a Pi and validate the local-console path (hands-on runbook):**
   [`docs/quickstart-local-console.md`](docs/quickstart-local-console.md)
+- **SSH over one USB-C cable (USB gadget mode):**
+  [`docs/usb-gadget.md`](docs/usb-gadget.md)
+- **Drive the shipped LazyVim setup (cheat-sheet):**
+  [`docs/lazyvim-guide.md`](docs/lazyvim-guide.md)
 - **Reproduce the same build automatically on first boot (cloud-init):**
   [`cloud-init/`](cloud-init/) - drop `user-data` on the boot partition, no SSH needed.
 - **Decisions:** [`docs/decisions/`](docs/decisions/) (ADR-0001 access model,

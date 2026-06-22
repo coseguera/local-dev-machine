@@ -5,7 +5,7 @@
 > imaged and tested but Copilot CLI was too sluggish interactively (see ADR-0002 and
 > §3a). Earlier Zero-2-W-specific reasoning is retained below as exploration history.
 
-## 0. Current status (updated 2026-06-21)
+## 0. Current status (updated 2026-06-22)
 
 **Milestone reached: the cloud-init local-console build is implemented and
 hardware-validated on a Pi 4.** A single NoCloud `cloud-init/user-data` reproduces the
@@ -25,11 +25,20 @@ Known rough edge (accepted, not fixed): logging in **before cloud-init finishes*
 half-provisioned console (default font, no glyphs/theme) until you wait for
 `cloud-init status --wait` and restart the console.
 
-**Milestone landed** (PR #1, merged). **USB gadget mode is now implemented** in
-cloud-init (CDC-ECM over USB-C, `docs/usb-gadget.md`) on branch `usb-gadget-mode` —
-pending hardware validation (`feas-gadget`/`feas-internet`). Remaining build targets:
-**OSC52 clipboard** and the **ephemeral/factory-reset + quickstart** docs. See the
-updated §7 checklist.
+**Milestone landed** (PR #1, merged). **USB gadget mode is now implemented AND
+hardware-validated** (PR #2, merged 2026-06-22): CDC-ECM over the Pi 4 USB-C port, with
+cable-only SSH + internet (Mac Internet Sharing) confirmed on real hardware, including a
+`wlan0`-off run. Two boot fixes were found and fixed during validation: RPi OS Lite ships
+**sshd disabled** (now `systemctl enable --now ssh`) and NetworkManager left the
+late-created **`usb0` unmanaged** (now a `conf.d` managed drop-in). The Mac-side client
+setup (install **JetBrainsMono Nerd Font** + a terminal-agnostic `Ctrl+t` / `<Space>tt`
+toggle, since Terminal.app can't send `<C-/>`) is documented in `docs/usb-gadget.md`.
+
+**Remaining work:** the only open *feature* is **OSC52 clipboard**
+(`feas-clipboard`/`build-clipboard`). Docs polish is **in progress** on branch
+`docs-polish` (this change): a plug-in-and-go `docs/quickstart.md`, a trimmed
+`docs/lazyvim-guide.md`, and a factory-reset section in `cloud-init/README.md`. The
+`build-ipad` path stays P2/optional. See the updated §7 checklist.
 
 ## 1. Problem statement & goals
 
@@ -263,10 +272,9 @@ colors). No-DE options:
 > Mirrors the session task tracker so the breakdown travels with this file. Phase-2 items list
 > their blocking dependencies in parentheses. Order within a phase is roughly execution order.
 
-### Phase 0 — Land the validated milestone (DO NEXT)
-- [ ] **land-milestone** — Push branch `restructure-and-cloud-init` and open a PR for the
-      hardware-validated cloud-init local-console build (see §0). No further code changes
-      needed to land; follow-on work (gadget mode, clipboard, docs) comes after.
+### Phase 0 — Land the validated milestone
+- [x] **land-milestone** — DONE: PR #1 (local-console build) merged; PR #2 (USB gadget
+      mode) merged 2026-06-22. Follow-on work: OSC52 clipboard + docs polish (this branch).
 
 ### Phase 1 — Feasibility (do these first; no hard inter-deps)
 - [~] **feas-ram** — N/A: Zero 2 W rejected as primary host (ADR-0002); Pi 4/5 removes the
@@ -276,8 +284,9 @@ colors). No-DE options:
 - [x] **feas-internet** — DONE (HW 2026-06-21): Mac Internet Sharing -> `usb0` gave the Pi
       192.168.2.2 + default route (metric 200, preferred over Wi-Fi); `ping github.com` over the
       cable succeeds. CDC-ECM worked natively on macOS (no RNDIS needed). Pi Wi-Fi = fallback.
-- [x] **feas-glyphs** — Pi-side: JetBrainsMono Nerd Font glyphs render in the cage+foot console
-      (validated). Mac-side optional-font doc belongs to the SSH path (not yet built).
+- [x] **feas-glyphs** — DONE both sides: Pi-side JetBrainsMono Nerd Font glyphs render in
+      the cage+foot console; Mac-side client-font setup (Homebrew `font-jetbrains-mono-nerd-font`
+      + Terminal.app profile font) is documented in `docs/usb-gadget.md` and HW-validated.
 - [x] **feas-localconsole** — DONE on Pi 4: **cage+foot** renders Nerd Font glyphs + Tokyo Night
       truecolor, coexists with SSH. (kmscon confirmed unavailable in Bookworm; cage+foot chosen.)
 - [ ] **feas-clipboard** — Test OSC52 yank→host clipboard over SSH (iTerm2/Terminal.app/Blink);
@@ -308,10 +317,13 @@ colors). No-DE options:
       headless `:Lazy! sync` (validated). Low-RAM profile not needed on Pi 4.
 - [ ] **build-clipboard** — Wire OSC52 yank if feas-clipboard validated.
       *(needs: build-lazyvim, feas-clipboard)*
-- [~] **build-ephemeral** — Mostly done: provisioner is idempotent (LazyVim clone fixed), reflash =
-      factory reset. Still want a one-paragraph factory-reset doc. *(needs: build-toolchain)*
-- [~] **build-docs** — Partial: `docs/quickstart-local-console.md` + `cloud-init/README.md` exist;
-      want a trimmed LazyVim guide + plug-in-and-go quickstart. *(needs: build-lazyvim)*
+- [~] **build-ephemeral** — In progress (docs-polish branch): provisioner is idempotent
+      (LazyVim clone fixed), reflash = factory reset. Adding a factory-reset / ephemerality
+      section to `cloud-init/README.md`. *(needs: build-toolchain)*
+- [~] **build-docs** — In progress (docs-polish branch): adding a plug-in-and-go
+      `docs/quickstart.md` (both front doors) + a trimmed `docs/lazyvim-guide.md`, on top of
+      the existing `docs/quickstart-local-console.md` + `cloud-init/README.md`.
+      *(needs: build-lazyvim)*
 - [x] **build-localconsole** — DONE on Pi 4: cage+foot kiosk, Nerd Font, boots into LazyVim,
       Tokyo Night, encrypted Copilot vault; coexists with SSH. *(was: build first — done)*
 - [ ] **build-ipad** — *(P2, may or may not happen)* Ensure design doesn't preclude an iPad host:
