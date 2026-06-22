@@ -101,4 +101,5 @@ power vs. data micro-USB ports) but was rejected as too slow for interactive Cop
 | `usb0` missing on the Pi | `systemctl status pocketdev-usb-gadget.service`; `journalctl -u pocketdev-usb-gadget`. Re-run `sudo /usr/local/sbin/pocketdev-usb-gadget`. |
 | `ssh pocketdev.local` won't resolve | `avahi-daemon` running? Try `ssh localuser@pocketdev.local%<host-iface>`, or read the Pi's `usb0` address from `ip -brief addr` over the console. |
 | No internet on the Pi | Internet Sharing must target the **gadget** interface; `ip route` on the Pi should show a default route. macOS prefers **CDC-ECM**; RNDIS works too but is flakier. |
+| In `nvim`, `Ctrl+/` does nothing (just a **beep**) | The **client terminal** decides what byte `Ctrl+/` sends, and **macOS Terminal.app sends nothing** for it (foot sends it fine). Use the terminal-agnostic fallback: **`Ctrl+t`** (toggles open/close) or **`<Space>tt`**. iTerm2/Ghostty/WezTerm can instead remap `Ctrl+/` to send `\037` (octal for `0x1F`). |
 | Under-voltage / random reboots | Power the Pi from GPIO 5V (see Power note). |

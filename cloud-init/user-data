@@ -365,6 +365,13 @@ runcmd:
           },
         },
       },
+      -- Terminal-agnostic fallback for LazyVims <C-/> toggle. macOS Terminal.app
+      -- cannot send <C-/> (it just rings the bell), so also bind a plain chord and a
+      -- leader sequence that every terminal transmits. <C-/> still works in foot.
+      keys = {
+        { "<c-t>", function() Snacks.terminal.toggle() end, mode = { "n", "t" }, desc = "Toggle Terminal (fallback)" },
+        { "<leader>tt", function() Snacks.terminal.toggle() end, desc = "Toggle Terminal" },
+      },
     }
     LUA' || true
 
