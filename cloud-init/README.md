@@ -167,6 +167,30 @@ You should *not* see `system vault not available`. If you do, see Troubleshootin
   had no internet (e.g. Wi-Fi country issue): get online, then clean + reboot to
   let cloud-init reinstall everything.
 
+## Factory reset / ephemerality
+
+The Pi is **disposable by design** - nothing precious should live on it. Two ways to
+return to a pristine build:
+
+- **Re-flash the SD card** (the true factory reset): re-run the imaging steps above. You
+  get a byte-for-byte fresh OS, and `user-data` rebuilds the entire environment on first
+  boot. This is the recommended reset.
+- **Re-provision in place** (faster, same card): `sudo cloud-init clean --logs` then
+  reboot. cloud-init re-runs `user-data` from scratch. Handy when first boot had no
+  internet (e.g. the Wi-Fi country issue) - get online, then clean + reboot.
+
+Because provisioning is **idempotent** (the LazyVim clone, font install, toolchain, and
+gadget setup all no-op or refresh cleanly on re-run), a rebuild reliably restores the full
+setup with no manual fix-ups. The only post-rebuild manual step is the one-time `copilot`
+device-code login (the token does not survive a reset - it lives in the keyring).
+
+**Before wiping**, capture anything you intentionally kept off the image:
+
+- Your **secret overlays** (Wi-Fi `network-config`, the localuser password hash in
+  `user-data`) live in your local working copy / gitignored files, not on the card - keep
+  those safe so the next flash can reapply them.
+- Any work-in-progress in the Pi's home dir is **not** backed up - push it to git first.
+
 ## Troubleshooting
 
 - **`wlan0` DOWN / no internet, and the console didn't launch (you got a plain
