@@ -125,9 +125,124 @@ write_files:
         exec cage -s -- foot
       fi
 
+  # USB gadget (CDC-ECM Ethernet over the Pi 4 USB-C port) bring-up script.
+  # libcomposite gives a CDC-ECM function (macOS/Linux native; RNDIS is Windows-y).
+  # Stable, locally-administered MACs so the host keeps the SAME interface across
+  # reboots. Safe to run when dwc2 peripheral mode isn't active yet (no UDC) - it
+  # just no-ops, so it can't break a boot that hasn't had the config.txt reboot yet.
+  - path: /usr/local/sbin/pocketdev-usb-gadget
+    permissions: '0755'
+    content: |
+      #!/bin/bash
+      # Pocket Dev: CDC-ECM USB Ethernet gadget via libcomposite (Pi 4 USB-C OTG).
+      set -e
+      G=/sys/kernel/config/usb_gadget/pocketdev
+
+      modprobe libcomposite 2>/dev/null || true
+      if ! mountpoint -q /sys/kernel/config 2>/dev/null; then
+        mount -t configfs none /sys/kernel/config 2>/dev/null || true
+      fi
+
+      # Already configured and bound to a UDC? Nothing to do (idempotent).
+      if [ -d "$G" ] && [ -s "$G/UDC" ]; then
+        exit 0
+      fi
+
+      # No UDC means dwc2 peripheral mode isn't active yet (needs the config.txt
+      # dtoverlay + a reboot). No-op gracefully so first boot never fails here.
+      UDC="$(ls /sys/class/udc 2>/dev/null | head -n1 || true)"
+      if [ -z "$UDC" ]; then
+        echo "pocketdev-usb-gadget: no UDC (dwc2 peripheral not active yet); skipping" >&2
+        exit 0
+      fi
+
+      mkdir -p "$G"
+      cd "$G"
+      echo 0x1d6b > idVendor          # Linux Foundation
+      echo 0x0104 > idProduct         # Multifunction Composite Gadget
+      echo 0x0100 > bcdDevice
+      echo 0x0200 > bcdUSB
+      mkdir -p strings/0x409
+      echo "pocketdev0001"            > strings/0x409/serialnumber
+      echo "Pocket Dev"               > strings/0x409/manufacturer
+      echo "Pocket Dev USB Ethernet"  > strings/0x409/product
+      mkdir -p configs/c.1/strings/0x409
+      echo "CDC ECM"                  > configs/c.1/strings/0x409/configuration
+      echo 250                        > configs/c.1/MaxPower
+      mkdir -p functions/ecm.usb0
+      echo "02:1a:11:00:00:01"        > functions/ecm.usb0/dev_addr   # Pi side
+      echo "02:1a:11:00:00:02"        > functions/ecm.usb0/host_addr  # host side
+      ln -sf functions/ecm.usb0 configs/c.1/
+      ls /sys/class/udc > UDC
+
+  # systemd unit that brings the gadget up on every boot. ConditionPathExists guards
+  # so it cleanly skips when dwc2 peripheral mode isn't active (pre-reboot first boot).
+  - path: /etc/systemd/system/pocketdev-usb-gadget.service
+    permissions: '0644'
+    content: |
+      [Unit]
+      Description=Pocket Dev USB CDC-ECM Ethernet gadget
+      After=sys-kernel-config.mount
+      Wants=sys-kernel-config.mount
+      ConditionPathExists=/sys/class/udc
+
+      [Service]
+      Type=oneshot
+      RemainAfterExit=yes
+      ExecStart=/usr/local/sbin/pocketdev-usb-gadget
+      ExecStop=/bin/sh -c 'echo "" > /sys/kernel/config/usb_gadget/pocketdev/UDC 2>/dev/null || true'
+
+      [Install]
+      WantedBy=multi-user.target
+
+  # NetworkManager connection for usb0. The Pi is a DHCP CLIENT on the cable: when the
+  # Mac runs Internet Sharing it hands the Pi an address + default route + DNS (WAN per
+  # plan 3c P1). When the Mac is NOT sharing, IPv4 DHCP simply fails (may-fail) and the
+  # link stays up on IPv6 link-local, so avahi still resolves `pocketdev.local` and SSH
+  # over the cable works. A higher route metric keeps Wi-Fi (fallback WAN) preferred only
+  # when usb0 has no default route. NM keyfiles must be 0600/root.
+  - path: /etc/NetworkManager/system-connections/usb0.nmconnection
+    permissions: '0600'
+    content: |
+      [connection]
+      id=usb0
+      type=ethernet
+      interface-name=usb0
+      autoconnect=true
+      autoconnect-priority=50
+
+      [ipv4]
+      method=auto
+      may-fail=true
+      route-metric=200
+
+      [ipv6]
+      method=link-local
+      may-fail=true
+
+  # Force NetworkManager to MANAGE usb0. The CDC-ECM gadget netdev is created late (by
+  # pocketdev-usb-gadget.service via configfs, after NM's initial device scan) and NM
+  # otherwise leaves it `unmanaged` -> the interface stays admin-DOWN, never gets a
+  # carrier, and never DHCPs, so the cable looks dead even though the gadget is bound.
+  # This device drop-in makes NM adopt + bring up usb0 whenever it appears, so the
+  # usb0.nmconnection above can activate (DHCP from the Mac, IPv6 link-local fallback).
+  - path: /etc/NetworkManager/conf.d/20-usb0-managed.conf
+    permissions: '0644'
+    content: |
+      [device-usb0]
+      match-device=interface-name:usb0
+      managed=1
+
 runcmd:
   # Apply the US keyboard layout written above to the live text console.
   - setupcon --force --save 2>/dev/null || true
+
+  # Enable the SSH server. Raspberry Pi OS Lite ships sshd DISABLED by default (it is
+  # normally turned on by the Imager toggle or a `ssh` file on the boot partition);
+  # ssh_pwauth above only configures password auth, it does not enable the service.
+  # The USB-gadget + Wi-Fi SSH front door (ADR-0001) is dead without this -> clients
+  # get "Connection refused". --now also starts it this boot (no reboot needed for SSH).
+  - systemctl enable --now ssh 2>/dev/null || true
 
   # Auto-unlock the gnome-keyring login keyring with the console login password so
   # the Copilot CLI can store its token encrypted (Secret Service) instead of
@@ -135,6 +250,31 @@ runcmd:
   # and SSH logins.
   - bash -c 'grep -q pam_gnome_keyring /etc/pam.d/login || printf "\nauth     optional  pam_gnome_keyring.so\nsession  optional  pam_gnome_keyring.so auto_start\n" >> /etc/pam.d/login'
   - bash -c 'grep -q pam_gnome_keyring /etc/pam.d/sshd || printf "\nauth     optional  pam_gnome_keyring.so\nsession  optional  pam_gnome_keyring.so auto_start\n" >> /etc/pam.d/sshd'
+
+  # USB gadget mode (CDC-ECM Ethernet over the Pi 4 USB-C port). The firmware reads
+  # config.txt/cmdline.txt only at boot, so these edits take effect on the NEXT boot -
+  # gadget mode comes up after the first reboot (which the normal first-boot workflow
+  # already involves). Idempotent. BOOT is /boot/firmware on Bookworm, /boot on older.
+  - |
+    bash -c 'set -e
+      BOOT=/boot/firmware; [ -d "$BOOT" ] || BOOT=/boot
+      CFG="$BOOT/config.txt"; CMD="$BOOT/cmdline.txt"
+      # 1) Put the dwc2 controller in peripheral (gadget) mode.
+      if [ -f "$CFG" ] && ! grep -q "^dtoverlay=dwc2,dr_mode=peripheral" "$CFG"; then
+        printf "\n# Pocket Dev: USB-C as a USB gadget (CDC-ECM Ethernet)\ndtoverlay=dwc2,dr_mode=peripheral\n" >> "$CFG"
+      fi
+      # 2) Load dwc2 early. Merge into an existing modules-load= token if present,
+      #    else append one. cmdline.txt MUST stay a single line.
+      if [ -f "$CMD" ] && ! grep -q "modules-load=.*dwc2" "$CMD"; then
+        if grep -q "modules-load=" "$CMD"; then
+          sed -i "s/\(modules-load=[^ ]*\)/\1,dwc2/" "$CMD"
+        else
+          sed -i "s/$/ modules-load=dwc2/" "$CMD"
+        fi
+      fi'
+  # Enable (not start) the gadget service: no UDC exists until the dwc2 reboot, so it
+  # would no-op now anyway; it brings usb0 up on every subsequent boot.
+  - systemctl enable pocketdev-usb-gadget.service 2>/dev/null || true
 
   # Telescope/LazyVim expect `fd`; Debian ships the binary as `fdfind`.
   - ln -sf "$(command -v fdfind)" /usr/local/bin/fd 2>/dev/null || true
@@ -224,6 +364,13 @@ runcmd:
             border = "rounded",
           },
         },
+      },
+      -- Terminal-agnostic fallback for LazyVims <C-/> toggle. macOS Terminal.app
+      -- cannot send <C-/> (it just rings the bell), so also bind a plain chord and a
+      -- leader sequence that every terminal transmits. <C-/> still works in foot.
+      keys = {
+        { "<c-t>", function() Snacks.terminal.toggle() end, mode = { "n", "t" }, desc = "Toggle Terminal (fallback)" },
+        { "<leader>tt", function() Snacks.terminal.toggle() end, desc = "Toggle Terminal" },
       },
     }
     LUA' || true

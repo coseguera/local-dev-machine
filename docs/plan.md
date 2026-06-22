@@ -25,10 +25,11 @@ Known rough edge (accepted, not fixed): logging in **before cloud-init finishes*
 half-provisioned console (default font, no glyphs/theme) until you wait for
 `cloud-init status --wait` and restart the console.
 
-**Immediate next step: land this milestone — push branch `restructure-and-cloud-init`
-and open a PR.** After that, the next build targets are USB **gadget mode** (the other
-co-equal front door), **OSC52 clipboard**, and the **ephemeral/factory-reset + quickstart**
-docs. See the updated §7 checklist.
+**Milestone landed** (PR #1, merged). **USB gadget mode is now implemented** in
+cloud-init (CDC-ECM over USB-C, `docs/usb-gadget.md`) on branch `usb-gadget-mode` —
+pending hardware validation (`feas-gadget`/`feas-internet`). Remaining build targets:
+**OSC52 clipboard** and the **ephemeral/factory-reset + quickstart** docs. See the
+updated §7 checklist.
 
 ## 1. Problem statement & goals
 
@@ -270,10 +271,11 @@ colors). No-DE options:
 ### Phase 1 — Feasibility (do these first; no hard inter-deps)
 - [~] **feas-ram** — N/A: Zero 2 W rejected as primary host (ADR-0002); Pi 4/5 removes the
       RAM constraint. Retained for history.
-- [ ] **feas-gadget** — Validate USB gadget networking: dwc2 + CDC-ECM up; host sees `usb0`; avahi
-      mDNS resolves `user@pocketdev.local` over the cable.
-- [ ] **feas-internet** — Confirm host (Mac) Internet Sharing → `usb0` piggyback (Starbucks/hotspot)
-      without the Pi joining venue Wi‑Fi; verify CDC-ECM vs RNDIS with sharing; Pi Wi‑Fi = fallback.
+- [x] **feas-gadget** — DONE (HW 2026-06-21): dwc2 CDC-ECM gadget up on the Pi 4 USB-C port;
+      Mac sees "Pocket Dev USB Ethernet"; `usb0` managed + addressed; mDNS/SSH over the cable work.
+- [x] **feas-internet** — DONE (HW 2026-06-21): Mac Internet Sharing -> `usb0` gave the Pi
+      192.168.2.2 + default route (metric 200, preferred over Wi-Fi); `ping github.com` over the
+      cable succeeds. CDC-ECM worked natively on macOS (no RNDIS needed). Pi Wi-Fi = fallback.
 - [x] **feas-glyphs** — Pi-side: JetBrainsMono Nerd Font glyphs render in the cage+foot console
       (validated). Mac-side optional-font doc belongs to the SSH path (not yet built).
 - [x] **feas-localconsole** — DONE on Pi 4: **cage+foot** renders Nerd Font glyphs + Tokyo Night
@@ -289,10 +291,17 @@ colors). No-DE options:
       secret overlays, `cloud-init/`).
 - [x] **build-image** — DONE via cloud-init: Pi OS arm64, SSH, hostname `pocketdev`, localuser,
       avahi/mDNS.
-- [ ] **build-gadget** — USB gadget networking: dtoverlay=dwc2, CDC-ECM bring-up, `usb0` addressing,
-      mDNS, host-side doc. *(needs: build-image, feas-gadget)*
-- [~] **build-wifi** — Partial: Pi onboard Wi‑Fi (provider #2) validated on first boot. P1 default
-      (host Internet Sharing over `usb0`) still pending — needs gadget mode. *(needs: feas-internet)*
+- [x] **build-gadget** — DONE, **hardware-validated 2026-06-21** (Pi 4 + Mac): `config.txt`
+      `dtoverlay=dwc2,dr_mode=peripheral` + `cmdline.txt` `modules-load=dwc2`, a libcomposite
+      **CDC-ECM** bring-up script + `pocketdev-usb-gadget.service`, a DHCP-client `usb0`
+      NetworkManager connection, and a `conf.d` drop-in forcing NM to manage the late-created
+      `usb0` netdev. After reboot `usb0` auto-comes-up at 192.168.2.2 with a default route;
+      `ssh localuser@192.168.2.2` over the cable + internet-over-cable (Mac Internet Sharing)
+      both work. Also fixed: cloud-init now `systemctl enable --now ssh` (RPi OS Lite ships
+      sshd disabled). Host-side doc: `docs/usb-gadget.md`. *(needs: build-image, feas-gadget)*
+- [x] **build-wifi** — DONE: P1 default (host Internet Sharing over `usb0`) HW-validated
+      2026-06-21; Pi onboard Wi-Fi (provider #2) validated as fallback. WAN is pluggable: usb0
+      default route (metric 200) preempts wlan0 (600) when the cable has WAN. *(needs: feas-internet)*
 - [x] **build-toolchain** — DONE: build-essential, gh, ripgrep/fd/fzf, delta, lazygit, Neovim
       release, nvm + Node 22 + `@github/copilot` (all installed by user-data, validated).
 - [x] **build-lazyvim** — DONE: idempotent LazyVim clone, snacks large-float `<C-/>` override,
