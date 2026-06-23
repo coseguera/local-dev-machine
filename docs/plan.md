@@ -34,9 +34,9 @@ late-created **`usb0` unmanaged** (now a `conf.d` managed drop-in). The Mac-side
 setup (install **JetBrainsMono Nerd Font** + a terminal-agnostic `Ctrl+t` / `<Space>tt`
 toggle, since Terminal.app can't send `<C-/>`) is documented in `docs/usb-gadget.md`.
 
-**Remaining work:** the only open *feature* is **OSC52 clipboard**
-(`feas-clipboard`/`build-clipboard`). Docs polish is **in progress** on branch
-`docs-polish` (this change): a plug-in-and-go `docs/quickstart.md`, a trimmed
+**Remaining work:** the core build is complete. **Clipboard needs no extra config** -
+copying out of nvim works via the terminal's own text selection (validated), so OSC52 is
+not pursued. Docs polish landed (PR #3): a plug-in-and-go `docs/quickstart.md`, a trimmed
 `docs/lazyvim-guide.md`, and a factory-reset section in `cloud-init/README.md`. The
 `build-ipad` path stays P2/optional. See the updated §7 checklist.
 
@@ -161,10 +161,13 @@ colors). No-DE options:
   never pull in a desktop stack or compromise the headless capability (SSH must keep working too).
 
 ### 3e. Clipboard
-- Over direct SSH (unlike VNC), **OSC 52** can sync yank→Mac clipboard if the Mac terminal
-  supports it (iTerm2 yes; Terminal.app limited). Evaluate OSC52 via snacks/`vim.clipboard` or
-  `ojroques/nvim-osc52`. This is strictly better than the VNC clipboard limitation noted in
-  ADR-0003. *(bench)*
+- **Resolved - no config needed.** Copying text out of nvim works via the terminal's own
+  text selection (drag-select, then the terminal's copy shortcut), validated in practice
+  from a LazyVim buffer. This works in any terminal/SSH client without a plugin.
+- OSC52 (snacks/`vim.clipboard` or `ojroques/nvim-osc52`) was considered but is **not
+  pursued**: native selection already covers the need, and OSC52 depends on the host
+  terminal supporting it. An nvim "copy-mode" toggle was prototyped and dropped - it
+  interfered with the native selection that already works cleanly.
 
 ### 3f. Ephemerality & reproducibility
 - "Throw away and recreate" on a Pi = a **reproducible flashable image** + a **first-boot
@@ -289,8 +292,8 @@ colors). No-DE options:
       + Terminal.app profile font) is documented in `docs/usb-gadget.md` and HW-validated.
 - [x] **feas-localconsole** — DONE on Pi 4: **cage+foot** renders Nerd Font glyphs + Tokyo Night
       truecolor, coexists with SSH. (kmscon confirmed unavailable in Bookworm; cage+foot chosen.)
-- [ ] **feas-clipboard** — Test OSC52 yank→host clipboard over SSH (iTerm2/Terminal.app/Blink);
-      wire snacks/nvim-osc52 if it works.
+- [x] **feas-clipboard** — DONE: copying out of nvim works via the terminal's native text
+      selection (validated from a LazyVim buffer). No plugin/config/OSC52 needed; OSC52 not pursued.
 - [x] **feas-repro** — DONE: cloud-init (NoCloud) chosen and implemented; reflash = factory reset.
 - [~] **feas-power** — N/A for Pi 4 host (Zero 2 W power concern moot).
 - [x] **feas-fallback** — DONE: Pi 4/5 + cloud-VM fallbacks documented (ADR-0002).
@@ -315,15 +318,15 @@ colors). No-DE options:
       release, nvm + Node 22 + `@github/copilot` (all installed by user-data, validated).
 - [x] **build-lazyvim** — DONE: idempotent LazyVim clone, snacks large-float `<C-/>` override,
       headless `:Lazy! sync` (validated). Low-RAM profile not needed on Pi 4.
-- [ ] **build-clipboard** — Wire OSC52 yank if feas-clipboard validated.
+- [x] **build-clipboard** — DONE by relying on the terminal's native text selection; no nvim
+      config needed. A copy-mode toggle was prototyped and dropped (it broke working native copy).
       *(needs: build-lazyvim, feas-clipboard)*
-- [~] **build-ephemeral** — In progress (docs-polish branch): provisioner is idempotent
-      (LazyVim clone fixed), reflash = factory reset. Adding a factory-reset / ephemerality
-      section to `cloud-init/README.md`. *(needs: build-toolchain)*
-- [~] **build-docs** — In progress (docs-polish branch): adding a plug-in-and-go
-      `docs/quickstart.md` (both front doors) + a trimmed `docs/lazyvim-guide.md`, on top of
-      the existing `docs/quickstart-local-console.md` + `cloud-init/README.md`.
-      *(needs: build-lazyvim)*
+- [x] **build-ephemeral** — DONE (merged via PR #3): provisioner is idempotent (LazyVim clone
+      fixed), reflash = factory reset, factory-reset / ephemerality section in
+      `cloud-init/README.md`. *(needs: build-toolchain)*
+- [x] **build-docs** — DONE (merged via PR #3): plug-in-and-go `docs/quickstart.md` (both front
+      doors) + trimmed `docs/lazyvim-guide.md`, on top of the existing
+      `docs/quickstart-local-console.md` + `cloud-init/README.md`. *(needs: build-lazyvim)*
 - [x] **build-localconsole** — DONE on Pi 4: cage+foot kiosk, Nerd Font, boots into LazyVim,
       Tokyo Night, encrypted Copilot vault; coexists with SSH. *(was: build first — done)*
 - [ ] **build-ipad** — *(P2, may or may not happen)* Ensure design doesn't preclude an iPad host:
